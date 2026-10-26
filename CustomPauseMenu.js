@@ -81,6 +81,20 @@
  * @min 0
  * @default 4
  *
+ * @param fadeInDuration
+ * @text Duração do fade in
+ * @desc Tempo para o menu aparecer, em frames (60 = 1 segundo). 0 = aparece na hora.
+ * @type number
+ * @min 0
+ * @default 12
+ *
+ * @param fadeOutDuration
+ * @text Duração do fade out
+ * @desc Tempo para o menu sumir, em frames (60 = 1 segundo). 0 = some na hora.
+ * @type number
+ * @min 0
+ * @default 12
+ *
  * @param textColor
  * @text Cor do texto
  * @desc Cor dos textos dos botões (hexadecimal, ex: #ffffff).
@@ -202,6 +216,8 @@
     const cursorOffsetX = Number(params.cursorOffsetX || 0);
     const cursorOffsetY = Number(params.cursorOffsetY || 0);
     const cursorBob = Number(params.cursorBob || 0);
+    const fadeInDuration = params.fadeInDuration === undefined ? 12 : Math.max(0, Number(params.fadeInDuration));
+    const fadeOutDuration = params.fadeOutDuration === undefined ? 12 : Math.max(0, Number(params.fadeOutDuration));
     const textColor = String(params.textColor || "#ffffff");
     const replaceEscMenu = String(params.replaceEscMenu || "true") === "true";
 
@@ -396,9 +412,103 @@
         Scene_MenuBase.prototype.create.call(this);
         this.createCommandWindow();
         this.createCursorSprite();
+        this.initMenuFade();
+    };
+
+    //---------------------------------------------------------------------
+    // Fade in / fade out
+    //---------------------------------------------------------------------
+
+    Scene_CustomPauseMenu.prototype.initMenuFade = function() {
+        // Ao voltar das telas de salvar/carregar, não repete o fade in.
+        const returning = SceneManager.isPreviousScene(Scene_Save) ||
+            SceneManager.isPreviousScene(Scene_Load);
+        this._closing = false;
+        this._closeCallback = null;
+        if (fadeInDuration > 0 && !returning) {
+            this._menuFadeValue = 0;
+            this._menuFadeSign = 1;
+        } else {
+            this._menuFadeValue = 255;
+            this._menuFadeSign = 0;
+        }
+        this.applyMenuFade();
+    };
+
+    Scene_CustomPauseMenu.prototype.applyMenuFade = function() {
+        const o = Math.round(this._menuFadeValue);
+        if (this._backgroundSprite) {
+            // O fundo padrão do jogo tem opacidade máxima de 192.
+            const max = backgroundImage ? 255 : 192;
+            this._backgroundSprite.opacity = Math.round(o * max / 255);
+        }
+        if (this._commandWindow) {
+            this._commandWindow.contentsOpacity = o;
+        }
+        if (this._cursorSprite) {
+            this._cursorSprite.opacity = o;
+        }
+        if (this._cancelButton) {
+            this._cancelButton.opacity = o;
+        }
+    };
+
+    Scene_CustomPauseMenu.prototype.updateMenuFade = function() {
+        if (this._menuFadeSign === 0) {
+            return;
+        }
+        const duration = this._menuFadeSign > 0 ? fadeInDuration : fadeOutDuration;
+        this._menuFadeValue += (255 / Math.max(1, duration)) * this._menuFadeSign;
+        let finished = false;
+        if (this._menuFadeSign > 0 && this._menuFadeValue >= 255) {
+            this._menuFadeValue = 255;
+            this._menuFadeSign = 0;
+        } else if (this._menuFadeSign < 0 && this._menuFadeValue <= 0) {
+            this._menuFadeValue = 0;
+            this._menuFadeSign = 0;
+            finished = true;
+        }
+        this.applyMenuFade();
+        if (finished) {
+            this.finishClose();
+        }
+    };
+
+    // Fecha o menu com fade out e, no fim, executa o callback.
+    Scene_CustomPauseMenu.prototype.startClose = function(callback) {
+        if (this._closing) {
+            return;
+        }
+        this._closing = true;
+        this._closeCallback = callback;
+        this._commandWindow.deactivate();
+        if (fadeOutDuration <= 0) {
+            this._menuFadeValue = 0;
+            this._menuFadeSign = 0;
+            this.applyMenuFade();
+            this.finishClose();
+        } else {
+            this._menuFadeSign = -1;
+        }
+    };
+
+    Scene_CustomPauseMenu.prototype.finishClose = function() {
+        const callback = this._closeCallback;
+        this._closeCallback = null;
+        if (callback) {
+            callback();
+        }
+    };
+
+    // ESC, botão de cancelar e "Fechar menu" passam por aqui.
+    Scene_CustomPauseMenu.prototype.popScene = function() {
+        this.startClose(() => SceneManager.pop());
     };
 
     Scene_CustomPauseMenu.prototype.createBackground = function() {
+        // Foto do jogo por baixo, para o fade mostrar o mapa em vez de tela preta.
+        this._underlaySprite = new Sprite(SceneManager.backgroundBitmap());
+        this.addChild(this._underlaySprite);
         if (backgroundImage) {
             const bitmap = ImageManager.loadSystem(backgroundImage);
             this._backgroundSprite = new Sprite(bitmap);
@@ -436,6 +546,7 @@
 
     Scene_CustomPauseMenu.prototype.update = function() {
         Scene_MenuBase.prototype.update.call(this);
+        this.updateMenuFade();
         this.updateCursorSprite();
     };
 
@@ -481,10 +592,12 @@
                 SceneManager.goto(Scene_Title);
                 break;
             case "commonEvent":
-                if (b.commonEventId > 0) {
-                    $gameTemp.reserveCommonEvent(b.commonEventId);
-                }
-                this.popScene();
+                this.startClose(() => {
+                    if (b.commonEventId > 0) {
+                        $gameTemp.reserveCommonEvent(b.commonEventId);
+                    }
+                    SceneManager.pop();
+                });
                 break;
             default:
                 this.popScene();
