@@ -5,7 +5,7 @@
 /*:
  * @target MZ
  * @plugindesc Menu de pausa customizável (ESC) com fundo, seta em imagem e botões configuráveis.
- * @author Você
+ * @author ymdntsk
  *
  * @help
  * ============================================================================
